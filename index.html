@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AquaFarm | Giám sát bể nuôi ESP32 MQTT</title>
+  <script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0b1424; color: #e9f4fa; line-height: 1.5; }
+    header { padding: 32px 20px; background: linear-gradient(110deg, #132c4d, #0c4d5a); border-bottom: 1px solid #245067; }
+    .wrap { width: min(1080px, calc(100% - 32px)); margin: auto; }
+    .eyebrow { text-transform: uppercase; color: #70e7de; font-size: 12px; letter-spacing: 2px; font-weight: 800; }
+    h1 { margin: 7px 0; font-size: clamp(24px, 3vw, 35px); }
+    header p { margin: 4px 0; color: #bdcedb; }
+    main { padding: 28px 0 50px; }
+    .status-bar { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 22px; }
+    .status { background: #14253a; border: 1px solid #29445a; border-radius: 30px; padding: 8px 13px; font-size: 13px; }
+    .status strong { color: #62dfca; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .card { background: #142236; border: 1px solid #2a4057; border-radius: 17px; padding: 22px; min-width: 0; }
+    .metric-title { font-size: 14px; color: #adc4d5; }
+    .metric-value { font-size: clamp(39px, 6vw, 61px); font-weight: 800; line-height: 1.25; letter-spacing: -1.5px; }
+    .unit { color: #80eedc; font-size: 20px; font-weight: 600; }
+    .caption { color: #97b3c4; font-size: 12px; margin-top: 7px; }
+    h2 { font-size: 18px; margin: 0 0 16px; }
+    .section { margin-top: 21px; }
+    .chart-frame { height: 230px; position: relative; }
+    canvas { width: 100% !important; height: 100% !important; }
+    label { color: #b5cad8; font-size: 14px; }
+    select { background: #0b1727; border: 1px solid #39526c; color: white; padding: 10px 12px; border-radius: 9px; font-size: 14px; margin-left: 10px; }
+    .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 15px; }
+    button { width: 100%; padding: 14px 16px; border: none; border-radius: 10px; font-size: 15px; font-weight: 800; cursor: pointer; color: #051a24; background: #62ddcd; }
+    button.valve { background: #ffc083; }
+    button.active { outline: 3px solid #f8fafc; outline-offset: 3px; }
+    button:disabled { background: #50616f; color: #c4d1d9; cursor: not-allowed; outline: none; }
+    .control-state { margin-top: 10px; color: #c3d4e0; font-size: 14px; }
+    .footnote { color: #8ba8b8; margin-top: 18px; font-size: 13px; }
+    @media(max-width: 690px) { .grid, .controls { grid-template-columns: 1fr; } .chart-frame { height: 210px; } }
+  </style>
+</head>
+<body>
+  <header><div class="wrap">
+    <div class="eyebrow">ESP32 · FreeRTOS · MQTT</div>
+    <h1>GIÁM SÁT BỂ NUÔI THỦY, HẢI SẢN</h1>
+    <p>Giám sát khoảng cách mặt nước, nhiệt độ và điều khiển cơ cấu chấp hành.</p>
+  </div></header>
+
+  <main class="wrap">
+    <div class="status-bar">
+      <div class="status">MQTT: <strong id="mqtt-status">Đang kết nối...</strong></div>
+      <div class="status">ESP32: <strong id="esp-status">Chưa rõ</strong></div>
+      <div class="status">Dữ liệu cuối: <strong id="updated-at">Chưa có</strong></div>
+    </div>
+
+    <!-- Hai the HTML co class hien thi du lieu so -->
+    <section class="grid">
+      <div class="card metric-card">
+        <div class="metric-title">Khoảng cách từ cảm biến đến mặt nước</div>
+        <div><span class="metric-value" id="distance-value">--</span> <span class="unit">m</span></div>
+        <div class="caption">Khoảng cách lớn nghĩa là nước thấp</div>
+      </div>
+      <div class="card metric-card">
+        <div class="metric-title">Nhiệt độ bể nuôi</div>
+        <div><span class="metric-value" id="temp-value">--</span> <span class="unit">°C</span></div>
+        <div class="caption">Dữ liệu cảm biến DS18B20</div>
+      </div>
+    </section>
+
+    <section class="grid section">
+      <div class="card"><h2>Biểu đồ khoảng cách (m)</h2><div class="chart-frame"><canvas id="distance-chart"></canvas></div></div>
+      <div class="card"><h2>Biểu đồ nhiệt độ (°C)</h2><div class="chart-frame"><canvas id="temp-chart"></canvas></div></div>
+    </section>
+
+    <section class="card section">
+      <h2>Điều khiển máy bơm và van thoát</h2>
+      <label for="mode-select">Chế độ điều khiển</label>
+      <select id="mode-select" aria-label="Chế độ điều khiển">
+        <option value="AUTO">AUTO - Tự động</option>
+        <option value="MANUAL">MANUAL - Thủ công</option>
+      </select>
+      <div class="controls">
+        <div>
+          <button type="button" id="pump-button" disabled>BẬT MÁY BƠM</button>
+          <div class="control-state" id="pump-state">Máy bơm: 0%</div>
+        </div>
+        <div>
+          <button class="valve" type="button" id="valve-button" disabled>MỞ VAN THOÁT</button>
+          <div class="control-state" id="valve-state">Van thoát: Đóng</div>
+        </div>
+      </div>
+      <p class="footnote">Ở chế độ AUTO, ESP32 tự chạy theo ngưỡng và thời gian trong đề. Chọn MANUAL để hai nút điều khiển có hiệu lực. Máy bơm và van thoát không hoạt động đồng thời.</p>
+    </section>
+    <p class="footnote">Broker thử nghiệm công cộng. Không dùng hệ thống này để điều khiển thiết bị thật khi chưa bổ sung xác thực, liên động điện và bảo vệ an toàn.</p>
+  </main>
+
+  <script>
+    'use strict';
+    const ROOT = 'aquafarm/wokwi-dang1806';
+    const TOPIC_DATA = `${ROOT}/telemetry`;
+    const TOPIC_STATE = `${ROOT}/state`;
+    const TOPIC_ONLINE = `${ROOT}/online`;
+    const TOPIC_COMMAND = `${ROOT}/command`;
+    const WSS_URL = 'wss://broker.emqx.io:8084/mqtt';
+
+    const el = id => document.getElementById(id);
+    const modeSelect = el('mode-select');
+    const pumpButton = el('pump-button');
+    const valveButton = el('valve-button');
+    let mode = 'AUTO', pumpPwm = 0, valveOpen = false;
+    let client = null;
+
+    function newChart(canvasId, label, strokeColor, minValue) {
+      return new Chart(el(canvasId).getContext('2d'), {
+        type: 'line',
+        data: { labels: [], datasets: [{ label, data: [], borderColor: strokeColor,
+          backgroundColor: strokeColor, tension: 0.25, borderWidth: 2,
+          pointRadius: 2, spanGaps: true }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { labels: { color: '#c7d5e2' } } },
+          scales: { x: { ticks: { color: '#91a8be', maxTicksLimit: 7 }, grid: { color: '#243950' } },
+                    y: { suggestedMin: minValue, ticks: { color: '#91a8be' }, grid: { color: '#243950' } } } }
+      });
+    }
+    // Chi tao bieu do khi Chart.js duoc tai thanh cong.
+    const chartsReady = typeof Chart !== 'undefined';
+    const distanceChart = chartsReady ? newChart('distance-chart', 'Khoảng cách (m)', '#69dfe2', 0) : null;
+    const tempChart = chartsReady ? newChart('temp-chart', 'Nhiệt độ (°C)', '#ffbf82', 0) : null;
+
+    function pushPoint(chart, time, value) {
+      chart.data.labels.push(time);
+      chart.data.datasets[0].data.push(value);
+      if (chart.data.labels.length > 30) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+      }
+      chart.update('none');
+    }
+    function updateControls() {
+      modeSelect.value = mode;
+      const enabled = mode === 'MANUAL' && client && client.connected;
+      pumpButton.disabled = !enabled;
+      valveButton.disabled = !enabled;
+      pumpButton.textContent = pumpPwm > 0 ? 'TẮT MÁY BƠM' : 'BẬT MÁY BƠM';
+      valveButton.textContent = valveOpen ? 'ĐÓNG VAN THOÁT' : 'MỞ VAN THOÁT';
+      pumpButton.classList.toggle('active', pumpPwm > 0);
+      valveButton.classList.toggle('active', valveOpen);
+      el('pump-state').textContent = `Máy bơm: ${Math.round(pumpPwm * 100 / 255)}%`;
+      el('valve-state').textContent = `Van thoát: ${valveOpen ? 'Mở' : 'Đóng'}`;
+    }
+    function sendCommand(command) {
+      if (!client || !client.connected) {
+        alert('Chưa kết nối MQTT. Vui lòng kiểm tra kết nối.');
+        return;
+      }
+      client.publish(TOPIC_COMMAND, command, { qos: 0, retain: false });
+    }
+    modeSelect.addEventListener('change', () => sendCommand(`MODE:${modeSelect.value}`));
+    pumpButton.addEventListener('click', () => {
+      if (mode === 'MANUAL') sendCommand(pumpPwm > 0 ? 'PUMP:OFF' : 'PUMP:ON');
+    });
+    valveButton.addEventListener('click', () => {
+      if (mode === 'MANUAL') sendCommand(valveOpen ? 'VALVE:OFF' : 'VALVE:ON');
+    });
+
+    if (typeof mqtt === 'undefined' || typeof Chart === 'undefined') {
+      el('mqtt-status').textContent = 'Thiếu thư viện JS/CDN';
+    } else {
+      client = mqtt.connect(WSS_URL, {
+        clientId: 'aqua-web-' + Math.random().toString(16).slice(2, 10),
+        clean: true, reconnectPeriod: 2500, connectTimeout: 15000, keepalive: 30
+      });
+      client.on('connect', () => {
+        el('mqtt-status').textContent = 'Đã kết nối';
+        client.subscribe([TOPIC_DATA, TOPIC_STATE, TOPIC_ONLINE]);
+        updateControls();
+      });
+      client.on('reconnect', () => { el('mqtt-status').textContent = 'Đang thử kết nối lại'; });
+      client.on('close', () => { el('mqtt-status').textContent = 'Mất kết nối'; updateControls(); });
+      client.on('error', (err) => { el('mqtt-status').textContent = 'Lỗi: ' + err.message; });
+      client.on('message', (topic, buffer) => {
+        const text = buffer.toString();
+        if (topic === TOPIC_ONLINE) {
+          el('esp-status').textContent = text === 'online' ? 'Online' : 'Offline';
+          return;
+        }
+        let msg;
+        try { msg = JSON.parse(text); } catch { return; }
+        if (topic === TOPIC_DATA) {
+          const dist = typeof msg.distanceM === 'number' && Number.isFinite(msg.distanceM) ? msg.distanceM : null;
+          const temp = typeof msg.temperatureC === 'number' && Number.isFinite(msg.temperatureC) ? msg.temperatureC : null;
+          el('distance-value').textContent = dist === null ? '--' : dist.toFixed(2);
+          el('temp-value').textContent = temp === null ? '--' : temp.toFixed(2);
+          const time = new Date().toLocaleTimeString('vi-VN');
+          el('updated-at').textContent = time;
+          if (distanceChart) pushPoint(distanceChart, time, dist);
+          if (tempChart) pushPoint(tempChart, time, temp);
+        } else if (topic === TOPIC_STATE) {
+          if (msg.mode === 'AUTO' || msg.mode === 'MANUAL') mode = msg.mode;
+          pumpPwm = Number.isFinite(msg.pumpPwm) ? msg.pumpPwm : 0;
+          valveOpen = msg.valve === true;
+          updateControls();
+        }
+      });
+    }
+    updateControls();
+  </script>
+</body>
+</html>

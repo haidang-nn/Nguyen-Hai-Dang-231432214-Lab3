@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "author": "AquaFarm ESP32 RTOS Demo",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 25, "left": 5, "attrs": {} },
+    { "type": "wokwi-hc-sr04", "id": "sonar", "top": -184, "left": -143, "attrs": { "distance": "120" } },
+    { "type": "wokwi-ds18b20", "id": "temp", "top": -145, "left": 285, "attrs": { "temperature": "28" } },
+    { "type": "wokwi-resistor", "id": "r-pullup", "top": -102, "left": 222, "rotate": 90, "attrs": { "value": "4700" } },
+    { "type": "wokwi-led", "id": "pump", "top": 128, "left": 315, "attrs": { "color": "blue", "label": "MAY BOM - PWM" } },
+    { "type": "wokwi-resistor", "id": "r-pump", "top": 165, "left": 255, "attrs": { "value": "220" } },
+    { "type": "wokwi-led", "id": "valve", "top": 245, "left": 315, "attrs": { "color": "red", "label": "VAN THOAT" } },
+    { "type": "wokwi-resistor", "id": "r-valve", "top": 276, "left": 255, "attrs": { "value": "220" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "sonar:VCC", "esp:5V", "red", [ "v-16", "h170" ] ],
+    [ "sonar:TRIG", "esp:5", "green", [ "v-1", "h135" ] ],
+    [ "sonar:ECHO", "esp:18", "orange", [ "v0", "h152" ] ],
+    [ "sonar:GND", "esp:GND.2", "black", [ "h-55", "v200" ] ],
+    [ "temp:VCC", "esp:3V3", "red", [ "h50", "v130" ] ],
+    [ "temp:DQ", "esp:4", "green", [ "h-84", "v75" ] ],
+    [ "temp:GND", "esp:GND.1", "black", [ "h120", "v105" ] ],
+    [ "r-pullup:1", "temp:VCC", "red", [] ],
+    [ "r-pullup:2", "temp:DQ", "green", [] ],
+    [ "esp:25", "r-pump:1", "blue", [ "v0", "h138" ] ],
+    [ "r-pump:2", "pump:A", "blue", [] ],
+    [ "pump:C", "esp:GND.3", "black", [ "h75", "v95" ] ],
+    [ "esp:26", "r-valve:1", "orange", [ "v0", "h150" ] ],
+    [ "r-valve:2", "valve:A", "orange", [] ],
+    [ "valve:C", "esp:GND.3", "black", [ "h75", "v46" ] ]
+  ],
+  "dependencies": {}
+}
